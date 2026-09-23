@@ -46,11 +46,19 @@ export default function Hero() {
               }`}
             >
               {s.image ? (
-                <Link href={s.href} className="absolute inset-0 block overflow-hidden" aria-label={s.title}>
+                <Link href={s.href} className="absolute inset-0 block overflow-hidden group" aria-label={s.title}>
                   <div key={i === active ? `active-${index}` : "idle"} className={`absolute inset-0 ${i === active ? "animate-ken-burns" : ""}`}>
                     <Image src={s.image} alt={s.title} fill priority={i === 0} sizes="(min-width: 1024px) 980px, 100vw" className="object-cover object-center" />
                   </div>
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-black/10" />
+                  <div className="absolute top-4 left-4 sm:top-6 sm:left-6 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/95 backdrop-blur-md text-navy-900 text-xs font-extrabold shadow-2xl animate-float border border-white/80 z-10">
+                    <span className="w-2.5 h-2.5 rounded-full bg-brand-500 animate-pulse" />
+                    <span>100% Certified Authentic Import</span>
+                  </div>
+                  <div className="absolute bottom-6 right-6 hidden sm:inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-brand-600 text-white text-xs font-black shadow-2xl group-hover:bg-brand-700 transition-all z-10">
+                    <span>Shop Collection</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </div>
                 </Link>
               ) : (
               <>
