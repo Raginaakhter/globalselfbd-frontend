@@ -1,43 +1,56 @@
 "use client";
 
-import React, { use, useEffect, useState } from "react";
+import React, { use, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useAuth } from "@/context/AuthContext";
+import { toast } from "sonner";
+import { ApiError, useAuth } from "@/context/AuthContext";
 import AccountHeader from "@/components/account/AccountHeader";
 import OrderDetailView from "@/components/orders/OrderDetailView";
-import type { OrderData } from "@/lib/order-types";
-import { ArrowLeft, Loader2, PackageX } from "lucide-react";
+import type { Order } from "@/lib/backend-types";
+import { CUSTOMER_CANCELLABLE } from "@/lib/order-status";
+import { ArrowLeft, Loader2, PackageX, XCircle } from "lucide-react";
 
 export default function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { authenticatedFetch, loading: authLoading } = useAuth();
-  const [order, setOrder] = useState<OrderData | null>(null);
+  const { api, loading: authLoading, hasPermission } = useAuth();
+  const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      // The backend only returns the order when it belongs to the signed-in customer.
+      const res = await api<Order>(`/orders/${encodeURIComponent(id)}`);
+      setOrder(res.data);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not load this order.");
+    } finally {
+      setLoading(false);
+    }
+  }, [api, id]);
 
   useEffect(() => {
-    if (authLoading) return;
-    (async () => {
-      setLoading(true);
-      setError("");
-      try {
-        // authenticatedFetch attaches the signed-in user's token; the API only returns this order
-        // if it actually belongs to them.
-        const res = await authenticatedFetch(`/api/orders/${id}`);
-        const data = await res.json();
-        if (data.success && data.data) {
-          setOrder(data.data);
-        } else {
-          setError(data.message || "Order not found, or it doesn't belong to your account.");
-        }
-      } catch {
-        setError("Network error while loading this order.");
-      } finally {
-        setLoading(false);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, authLoading]);
+    if (!authLoading) queueMicrotask(load);
+  }, [authLoading, load]);
+
+  const cancel = async () => {
+    if (!order || !confirm(`Cancel order ${order.orderNumber}? This cannot be undone.`)) return;
+    setCancelling(true);
+    try {
+      const res = await api<Order>(`/orders/${order._id}/cancel`, { method: "PATCH" });
+      setOrder(res.data);
+      toast.success(res.message || "Order cancelled");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not cancel the order.");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const canCancel = order && CUSTOMER_CANCELLABLE.includes(order.orderStatus) && hasPermission("orders.create");
 
   return (
     <div className="min-h-screen bg-mesh-light bg-dot-pattern flex flex-col">
@@ -48,13 +61,13 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           <ArrowLeft className="w-4 h-4" /> Back to My Orders
         </Link>
 
-        {(loading || authLoading) && (
+        {(loading || authLoading) && !order && (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="w-8 h-8 text-cyan-600 animate-spin" />
           </div>
         )}
 
-        {!loading && !authLoading && error && (
+        {!loading && error && (
           <div className="text-center py-16">
             <PackageX className="w-12 h-12 text-slate-300 mx-auto mb-3" />
             <p className="text-sm font-semibold text-slate-600">{error}</p>
@@ -64,7 +77,20 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         )}
 
-        {!loading && !authLoading && order && <OrderDetailView order={order} />}
+        {order && (
+          <OrderDetailView order={order}>
+            {canCancel && (
+              <button
+                type="button"
+                onClick={cancel}
+                disabled={cancelling}
+                className="w-full py-3 rounded-full border-2 border-rose-200 text-sm font-bold text-rose-600 hover:bg-rose-50 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {cancelling ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />} Cancel order
+              </button>
+            )}
+          </OrderDetailView>
+        )}
       </main>
     </div>
   );

@@ -1,12 +1,12 @@
 import SectionHeading from "./SectionHeading";
 import ProductCard from "./ProductCard";
-import type { Product } from "./data";
+import type { StoreProduct } from "@/lib/storefront";
 
 type Props = {
   id: string;
   title: string;
   bn?: string;
-  products: Product[];
+  products: StoreProduct[];
   tone?: "plain" | "tinted";
   href?: string;
 };
@@ -17,7 +17,7 @@ export default function ProductSection({ id, title, bn, products, tone = "plain"
   const grid = (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
       {products.map((p) => (
-        <ProductCard key={p.id} product={p} />
+        <ProductCard key={p._id} product={p} />
       ))}
     </div>
   );

@@ -8,38 +8,21 @@ import {
   DeliveryPromise,
   Newsletter,
 } from "@/components/landing";
-import { apiFetch } from "@/lib/api";
-import type { Product } from "@/lib/catalog";
-
-type FeaturedData = {
-  bestSellers: Product[];
-  topDeals: Product[];
-  newArrivals: Product[];
-};
+import { fetchProducts } from "@/lib/server/storefront";
 
 export default async function Home() {
-  let bestSellers: Product[] = [];
-  let topDeals: Product[] = [];
-  let newArrivals: Product[] = [];
-
-  try {
-    const data = await apiFetch<FeaturedData>("/api/products/featured");
-    bestSellers = data.bestSellers;
-    topDeals = data.topDeals;
-    newArrivals = data.newArrivals;
-  } catch (e) {
-    console.error("Failed to fetch featured products:", e);
-  }
+  // The public API has no "best sellers" data, so the home page shows the newest products and the discounted ones.
+  const [newest, recentPool] = await Promise.all([fetchProducts({ sort: "newest", limit: 8 }), fetchProducts({ sort: "newest", limit: 60 })]);
+  const deals = recentPool.products.filter((p) => p.discountPercent > 0).sort((a, b) => b.discountPercent - a.discountPercent).slice(0, 8);
 
   return (
     <>
       <Hero />
       <TrustBar />
       <CategoryGrid />
-      <ProductSection id="best-sellers" title="Best Selling Items" bn="সবচেয়ে বেশি বিক্রিত পণ্য" products={bestSellers} href="/shop?sort=popular" />
-      <ProductSection id="deals" title="Top Deals — Save Big" bn="সেরা অফার, সেরা দাম" products={topDeals} tone="tinted" href="/shop?sort=discount" />
+      <ProductSection id="new-arrivals" title="New Arrivals" bn="নতুন এসেছে" products={newest.products} href="/shop?sort=newest" />
+      <ProductSection id="deals" title="Top Deals — Save Big" bn="সেরা অফার, সেরা দাম" products={deals} tone="tinted" href="/shop" />
       <PromoBanner />
-      <ProductSection id="new-arrivals" title="New Arrivals" bn="নতুন এসেছে" products={newArrivals} href="/shop?sort=new" />
       <BrandsMarquee />
       <DeliveryPromise />
       <Newsletter />

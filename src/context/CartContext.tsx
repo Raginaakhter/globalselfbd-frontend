@@ -1,120 +1,173 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { CartLine, DetailedLine } from "@/lib/shop";
+import { useAuth } from "@/context/AuthContext";
+import type { Cart } from "@/lib/backend-types";
+import type { StoreProduct } from "@/lib/storefront";
 
-const CART_KEY = "gsbd-cart";
+const LOCAL_KEY = "gsbd-cart-v2";
 const MAX_QTY = 10;
 
-// The cart lives in localStorage and is exposed through useSyncExternalStore, so the server render and the
-// first client render both see an empty cart and React swaps in the stored one right after hydration.
-const listeners = new Set<() => void>();
-const EMPTY = "[]";
+/**
+ * One cart line. Signed-in customers use the backend cart (GET/POST/PUT/DELETE /api/cart), whose prices
+ * the server refreshes on every read. Guests keep lines in localStorage with the price seen when adding;
+ * they are moved into the backend cart right after login, and checkout always uses the backend cart.
+ */
+export type CartLine = {
+  /** Backend cart item id, or a local key (productId + size) for guests. */
+  key: string;
+  productId: string;
+  slug: string;
+  title: string;
+  thumbnail: string;
+  unitPrice: number;
+  quantity: number;
+  size: string | null;
+  unit: string | null;
+  subtotal: number;
+  isAvailable: boolean;
+  issue: string | null;
+};
 
-function subscribeCart(cb: () => void) {
-  listeners.add(cb);
-  window.addEventListener("storage", cb); // keep other tabs in sync
-  return () => {
-    listeners.delete(cb);
-    window.removeEventListener("storage", cb);
-  };
+type AddOptions = { size?: string | null; openDrawer?: boolean; silent?: boolean };
+
+interface CartContextType {
+  lines: CartLine[];
+  count: number;
+  /** Sum of the lines that can be ordered. */
+  subtotal: number;
+  hasIssues: boolean;
+  /** "server" once the cart lives in the backend (signed-in customer). */
+  source: "server" | "local";
+  hydrated: boolean;
+  loading: boolean;
+  drawerOpen: boolean;
+  openDrawer: () => void;
+  closeDrawer: () => void;
+  addItem: (product: StoreProduct, qty?: number, opts?: AddOptions) => Promise<boolean>;
+  setQty: (key: string, qty: number) => Promise<void>;
+  removeItem: (key: string) => Promise<void>;
+  clear: () => Promise<void>;
+  /** Reloads the backend cart (e.g. after an order was placed). */
+  refresh: () => Promise<void>;
 }
 
-function readCartRaw(): string {
-  try {
-    return localStorage.getItem(CART_KEY) ?? EMPTY;
-  } catch {
-    return EMPTY;
-  }
-}
+const CartContext = createContext<CartContextType | undefined>(undefined);
 
-function writeCart(items: CartLine[]) {
+function readLocal(): CartLine[] {
   try {
-    localStorage.setItem(CART_KEY, JSON.stringify(items));
-  } catch {
-    // ignore quota / private-mode errors
-  }
-  listeners.forEach((l) => l());
-}
-
-function parseCart(raw: string): CartLine[] {
-  try {
-    const parsed = JSON.parse(raw) as CartLine[];
-    // Only validate shape — product existence is verified by the API
-    return parsed
-      .filter((l) => typeof l.id === "string" && l.id && typeof l.qty === "number" && l.qty > 0)
-      .map((l) => ({ id: l.id, qty: Math.min(l.qty, MAX_QTY) }));
+    const parsed = JSON.parse(localStorage.getItem(LOCAL_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((l) => l && typeof l.productId === "string" && l.quantity > 0) : [];
   } catch {
     return [];
   }
 }
 
-const noopSubscribe = () => () => {};
-
-interface CartContextType {
-  /** Lines with server-verified pricing. Empty until first API response. */
-  lines: DetailedLine[];
-  count: number;
-  subtotal: number;
-  hydrated: boolean;
-  /** True while cart pricing is being fetched from the server */
-  loading: boolean;
-  drawerOpen: boolean;
-  openDrawer: () => void;
-  closeDrawer: () => void;
-  /** Raw cart items from localStorage (id + qty only, no prices) */
-  rawItems: CartLine[];
-  addItem: (id: string, qty?: number, opts?: { openDrawer?: boolean; silent?: boolean; name?: string }) => void;
-  setQty: (id: string, qty: number) => void;
-  removeItem: (id: string) => void;
-  clear: () => void;
+function writeLocal(lines: CartLine[]) {
+  try {
+    if (lines.length) localStorage.setItem(LOCAL_KEY, JSON.stringify(lines));
+    else localStorage.removeItem(LOCAL_KEY);
+  } catch {
+    // ignore quota / private-mode errors
+  }
 }
 
-const CartContext = createContext<CartContextType | undefined>(undefined);
+const fromServer = (cart: Cart | null | undefined): CartLine[] =>
+  (cart?.items ?? []).map((i) => ({
+    key: i._id,
+    productId: i.productId,
+    slug: i.productSnapshot?.slug ?? i.productId,
+    title: i.productSnapshot?.productTitle ?? "Product",
+    thumbnail: i.productSnapshot?.thumbnail ?? "",
+    unitPrice: i.unitPrice,
+    quantity: i.quantity,
+    size: i.selectedSize,
+    unit: i.selectedUnit,
+    subtotal: i.subtotal,
+    isAvailable: i.isAvailable,
+    issue: i.issue,
+  }));
+
+const localKey = (productId: string, size: string | null) => `${productId}:${size ?? ""}`;
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
-  const raw = useSyncExternalStore(subscribeCart, readCartRaw, () => EMPTY);
-  const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false);
-  const items = useMemo(() => parseCart(raw), [raw]);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [serverLines, setServerLines] = useState<DetailedLine[]>([]);
+  const { isAuthenticated, loading: authLoading, hasPermission, api } = useAuth();
+  const useServer = isAuthenticated && hasPermission("cart.manage");
+
+  const [lines, setLines] = useState<CartLine[]>([]);
+  const [hydrated, setHydrated] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const source: "server" | "local" = useServer ? "server" : "local";
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
 
-  // Fetch server-verified pricing whenever items change
-  useEffect(() => {
-    if (!hydrated || items.length === 0) {
-      queueMicrotask(() => setServerLines([]));
-      return;
+  const applyServer = useCallback((cart: Cart | null | undefined) => {
+    if (sourceRef.current === "server") setLines(fromServer(cart));
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if (sourceRef.current !== "server") return;
+    setLoading(true);
+    try {
+      const res = await api<Cart>("/cart");
+      applyServer(res.data);
+    } catch {
+      // keep the last known cart
+    } finally {
+      setLoading(false);
     }
+  }, [api, applyServer]);
 
+  // Pick the cart source once auth is known: guests read localStorage; customers merge it into the backend cart.
+  useEffect(() => {
+    if (authLoading) return;
     let cancelled = false;
-    const timer = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/cart/calculate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ items }),
-        });
-        if (!cancelled && res.ok) {
-          const json = await res.json();
-          if (json.success && json.data?.lines) {
-            setServerLines(json.data.lines);
-          }
-        }
-      } catch {
-        // Keep showing last known prices on network error
-      } finally {
-        if (!cancelled) setLoading(false);
+    queueMicrotask(async () => {
+      if (!useServer) {
+        setLines(readLocal());
+        setHydrated(true);
+        return;
       }
-    }, 150); // small debounce
-
+      setLoading(true);
+      const pending = readLocal();
+      let failed = 0;
+      for (const l of pending) {
+        try {
+          await api("/cart", { method: "POST", body: JSON.stringify({ productId: l.productId, quantity: l.quantity, size: l.size ?? undefined, unit: l.unit ?? undefined }) });
+        } catch {
+          failed++;
+        }
+      }
+      if (pending.length) {
+        writeLocal([]);
+        if (failed) toast.warning(`${failed} item${failed === 1 ? "" : "s"} from your guest cart could not be added (no longer available).`);
+      }
+      try {
+        const res = await api<Cart>("/cart");
+        if (!cancelled) setLines(fromServer(res.data));
+      } catch {
+        if (!cancelled) setLines([]);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setHydrated(true);
+        }
+      }
+    });
     return () => {
       cancelled = true;
-      clearTimeout(timer);
     };
-  }, [items, hydrated]);
+  }, [authLoading, useServer, api]);
+
+  // Keep other tabs' guest carts in sync.
+  useEffect(() => {
+    if (useServer) return;
+    const onStorage = (e: StorageEvent) => e.key === LOCAL_KEY && setLines(readLocal());
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [useServer]);
 
   // Lock page scroll while the drawer is open, close it on Escape.
   useEffect(() => {
@@ -129,43 +182,120 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     };
   }, [drawerOpen]);
 
-  const addItem = useCallback<CartContextType["addItem"]>((id, qty = 1, opts = {}) => {
-    const cur = parseCart(readCartRaw());
-    const existing = cur.find((l) => l.id === id);
-    writeCart(
-      existing
-        ? cur.map((l) => (l.id === id ? { ...l, qty: Math.min(l.qty + qty, MAX_QTY) } : l))
-        : [...cur, { id, qty: Math.min(qty, MAX_QTY) }]
-    );
-    if (!opts.silent) toast.success(`${opts.name ?? "Item"} added to cart`);
-    if (opts.openDrawer !== false) setDrawerOpen(true);
+  const updateLocal = useCallback((fn: (cur: CartLine[]) => CartLine[]) => {
+    const next = fn(readLocal()).map((l) => ({ ...l, subtotal: l.unitPrice * l.quantity }));
+    writeLocal(next);
+    setLines(next);
   }, []);
 
-  const setQty = useCallback((id: string, qty: number) => {
-    const cur = parseCart(readCartRaw());
-    writeCart(qty <= 0 ? cur.filter((l) => l.id !== id) : cur.map((l) => (l.id === id ? { ...l, qty: Math.min(qty, MAX_QTY) } : l)));
-  }, []);
+  const serverCall = useCallback(
+    async (path: string, init: RequestInit) => {
+      setLoading(true);
+      try {
+        const res = await api<Cart>(path, init);
+        applyServer(res.data);
+        return true;
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not update your cart");
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [api, applyServer]
+  );
 
-  const removeItem = useCallback((id: string) => writeCart(parseCart(readCartRaw()).filter((l) => l.id !== id)), []);
-  const clear = useCallback(() => writeCart([]), []);
+  const addItem = useCallback<CartContextType["addItem"]>(
+    async (product, qty = 1, opts = {}) => {
+      const size = opts.size ?? null;
+      if (product.sizes.length && !size) {
+        toast.info("Please choose a size first.");
+        return false;
+      }
+      if (product.availability === "OUT_OF_STOCK") {
+        toast.error("This product is out of stock.");
+        return false;
+      }
+      let ok = true;
+      if (sourceRef.current === "server") {
+        ok = await serverCall("/cart", {
+          method: "POST",
+          body: JSON.stringify({ productId: product._id, quantity: qty, size: size ?? undefined, unit: product.unit ?? undefined }),
+        });
+      } else {
+        const key = localKey(product._id, size);
+        updateLocal((cur) => {
+          const existing = cur.find((l) => l.key === key);
+          if (existing) return cur.map((l) => (l.key === key ? { ...l, quantity: Math.min(l.quantity + qty, MAX_QTY) } : l));
+          return [
+            ...cur,
+            {
+              key,
+              productId: product._id,
+              slug: product.slug,
+              title: product.productTitle,
+              thumbnail: product.thumbnail,
+              unitPrice: product.finalPrice,
+              quantity: Math.min(qty, MAX_QTY),
+              size,
+              unit: product.unit,
+              subtotal: product.finalPrice * qty,
+              isAvailable: true,
+              issue: null,
+            },
+          ];
+        });
+      }
+      if (ok) {
+        if (!opts.silent) toast.success(`${product.productTitle} added to cart`);
+        if (opts.openDrawer !== false) setDrawerOpen(true);
+      }
+      return ok;
+    },
+    [serverCall, updateLocal]
+  );
+
+  const setQty = useCallback<CartContextType["setQty"]>(
+    async (key, qty) => {
+      if (qty <= 0) {
+        if (sourceRef.current === "server") await serverCall(`/cart/${key}`, { method: "DELETE" });
+        else updateLocal((cur) => cur.filter((l) => l.key !== key));
+        return;
+      }
+      const quantity = Math.min(qty, MAX_QTY);
+      if (sourceRef.current === "server") await serverCall(`/cart/${key}`, { method: "PUT", body: JSON.stringify({ quantity }) });
+      else updateLocal((cur) => cur.map((l) => (l.key === key ? { ...l, quantity } : l)));
+    },
+    [serverCall, updateLocal]
+  );
+
+  const removeItem = useCallback((key: string) => setQty(key, 0), [setQty]);
+
+  const clear = useCallback(async () => {
+    if (sourceRef.current === "server") await serverCall("/cart", { method: "DELETE" });
+    else updateLocal(() => []);
+  }, [serverCall, updateLocal]);
 
   const value = useMemo<CartContextType>(() => {
+    const available = lines.filter((l) => l.isAvailable);
     return {
-      lines: serverLines,
-      count: serverLines.reduce((n, l) => n + l.qty, 0),
-      subtotal: serverLines.reduce((n, l) => n + l.lineTotal, 0),
+      lines,
+      count: lines.reduce((n, l) => n + l.quantity, 0),
+      subtotal: available.reduce((n, l) => n + l.subtotal, 0),
+      hasIssues: lines.some((l) => !l.isAvailable),
+      source,
       hydrated,
       loading,
       drawerOpen,
       openDrawer: () => setDrawerOpen(true),
       closeDrawer: () => setDrawerOpen(false),
-      rawItems: items,
       addItem,
       setQty,
       removeItem,
       clear,
+      refresh,
     };
-  }, [serverLines, hydrated, loading, drawerOpen, items, addItem, setQty, removeItem, clear]);
+  }, [lines, source, hydrated, loading, drawerOpen, addItem, setQty, removeItem, clear, refresh]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

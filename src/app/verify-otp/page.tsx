@@ -13,12 +13,14 @@ function VerifyOtpForm() {
 
   const { verifyOtp, forgotPassword } = useAuth();
   const [email, setEmail] = useState(emailParam);
-  const [otp, setOtp] = useState(["", "", "", ""]);
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [cooldown, setCooldown] = useState(60);
 
   const inputRefs = [
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
@@ -41,7 +43,7 @@ function VerifyOtpForm() {
     setOtp(newOtp);
 
     // Auto-focus next input box
-    if (value && index < 3) {
+    if (value && index < 5) {
       inputRefs[index + 1].current?.focus();
     }
   };
@@ -55,10 +57,10 @@ function VerifyOtpForm() {
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
     const pastedData = e.clipboardData.getData("text").trim();
-    if (/^\d{4}$/.test(pastedData)) {
+    if (/^\d{6}$/.test(pastedData)) {
       const digits = pastedData.split("");
       setOtp(digits);
-      inputRefs[3].current?.focus();
+      inputRefs[5].current?.focus();
     }
   };
 
@@ -72,7 +74,7 @@ function VerifyOtpForm() {
       return;
     }
 
-    if (fullOtp.length !== 4) {
+    if (fullOtp.length !== 6) {
       return;
     }
 
@@ -96,7 +98,7 @@ function VerifyOtpForm() {
 
     if (success) {
       setCooldown(60);
-      setOtp(["", "", "", ""]);
+      setOtp(["", "", "", "", "", ""]);
       inputRefs[0].current?.focus();
     }
   };
@@ -120,7 +122,7 @@ function VerifyOtpForm() {
         </div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Enter Verification Code</h1>
         <p className="text-sm text-slate-500 mt-1">
-          We have sent a 4-digit code to <span className="font-semibold text-slate-800">{email || "your email"}</span>
+          We have sent a 6-digit code to <span className="font-semibold text-slate-800">{email || "your email"}</span>
         </p>
       </div>
 
@@ -144,12 +146,12 @@ function VerifyOtpForm() {
             </div>
           )}
 
-          {/* 4 Digit OTP Box */}
+          {/* 6 Digit OTP Box */}
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider text-center mb-3">
-              4-Digit Security Code
+              6-Digit Security Code
             </label>
-            <div className="flex justify-center gap-3 sm:gap-4" onPaste={handlePaste}>
+            <div className="flex justify-center gap-2 sm:gap-3" onPaste={handlePaste}>
               {otp.map((digit, idx) => (
                 <input
                   key={idx}
@@ -159,7 +161,7 @@ function VerifyOtpForm() {
                   value={digit}
                   onChange={(e) => handleDigitChange(idx, e.target.value)}
                   onKeyDown={(e) => handleKeyDown(idx, e)}
-                  className="w-14 h-16 sm:w-16 sm:h-18 text-center text-2xl font-black text-slate-900 bg-white border-2 border-slate-200 rounded-2xl focus:border-cyan-600 focus:ring-4 focus:ring-cyan-500/10 outline-none transition-all shadow-sm"
+                  className="w-11 h-14 sm:w-14 sm:h-16 text-center text-xl sm:text-2xl font-black text-slate-900 bg-white border-2 border-slate-200 rounded-2xl focus:border-cyan-600 focus:ring-4 focus:ring-cyan-500/10 outline-none transition-all shadow-sm"
                 />
               ))}
             </div>
@@ -167,7 +169,7 @@ function VerifyOtpForm() {
 
           <button
             type="submit"
-            disabled={loading || otp.join("").length !== 4}
+            disabled={loading || otp.join("").length !== 6}
             className="w-full py-3.5 px-4 rounded-xl font-bold text-sm btn-primary-gradient flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? (

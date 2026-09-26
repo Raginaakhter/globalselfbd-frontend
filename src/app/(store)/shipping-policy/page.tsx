@@ -37,7 +37,7 @@ function QuickFacts({ settings }: { settings: SiteSettings }) {
         </tbody>
       </table>
       <p className="px-4 py-3 text-xs text-slate-500 bg-slate-50/60 border-t border-slate-100">
-        Free delivery on orders over {formatPrice(settings.freeShippingThreshold)}. Charges shown are current as of the date above and may change —
+        Charges shown are current as of the date above and may change —
         the exact delivery fee for your order is always shown at checkout before you confirm.
       </p>
     </div>

@@ -1,8 +1,19 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { callBackend, jsonPost } from "@/lib/server/backend";
+import { forwardedFor, readJson } from "../_shared";
 
-export async function POST() {
-  return NextResponse.json({
-    success: true,
-    message: "Password reset successful! You can now log in with your new password.",
-  });
+export async function POST(req: NextRequest) {
+  const { resetToken, newPassword, confirmPassword } = await readJson(req);
+  let email: unknown;
+  let otp: unknown;
+  try {
+    ({ email, otp } = JSON.parse(Buffer.from(String(resetToken), "base64url").toString("utf8")));
+  } catch {
+    return NextResponse.json({ success: false, message: "Reset link is invalid. Please request a new code." }, { status: 400 });
+  }
+  const { status, body } = await callBackend(
+    "/api/auth/reset-password",
+    jsonPost({ email, otp, password: newPassword, confirmPassword }, forwardedFor(req))
+  );
+  return NextResponse.json(body, { status });
 }

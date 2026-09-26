@@ -4,7 +4,6 @@ import React, { useState, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import GoogleLoginButton from "@/components/auth/GoogleLoginButton";
 import { Mail, Lock, Eye, EyeOff, Loader2, Globe, ShieldCheck, ArrowRight } from "lucide-react";
 
 function LoginForm() {
@@ -141,21 +140,6 @@ function LoginForm() {
             )}
           </button>
         </form>
-
-        {/* Divider */}
-        <div className="my-6 flex items-center gap-4">
-          <div className="flex-1 h-[1px] bg-slate-200"></div>
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">OR</span>
-          <div className="flex-1 h-[1px] bg-slate-200"></div>
-        </div>
-
-        {/* Google OAuth */}
-        <GoogleLoginButton
-          onSuccessRedirect={() => {
-            const target = redirectPath.startsWith("/") && !redirectPath.startsWith("//") ? redirectPath : "/";
-            router.push(target);
-          }}
-        />
 
         {/* Footer Redirect */}
         <div className="mt-8 text-center text-sm text-slate-600">

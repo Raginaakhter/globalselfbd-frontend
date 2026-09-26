@@ -1,63 +1,50 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { BadgeCheck, CheckCircle2, RotateCcw, ShieldCheck, Star, Truck } from "lucide-react";
+import { CheckCircle2, CircleX, RotateCcw, ShieldCheck, Truck } from "lucide-react";
 import { fetchSite } from "@/lib/site-fetch";
 import ProductSection from "@/components/landing/ProductSection";
 import PurchasePanel from "@/components/shop/PurchasePanel";
-import ProductImage from "@/components/shop/ProductImage";
-import { apiFetch } from "@/lib/api";
+import ProductGallery from "@/components/shop/ProductGallery";
+import { fetchProduct, fetchProducts } from "@/lib/server/storefront";
+import { packLabel } from "@/lib/storefront";
 import { formatPrice } from "@/lib/shop";
-import type { Product } from "@/lib/catalog";
 
 type Params = { id: string };
 
-type ProductDetailData = {
-  product: Product;
-  related: Product[];
-};
-
 export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
   const { id } = await params;
-  try {
-    const data = await apiFetch<ProductDetailData>(`/api/products/${id}`);
-    const product = data.product;
-    return {
-      title: `${product.name} | Global Shelf BD`,
-      description: `${product.brand} ${product.name} (${product.size}) — ${formatPrice(product.price)}. ${product.description}`.slice(0, 200),
-    };
-  } catch {
-    return { title: "Product not found | Global Shelf BD" };
-  }
+  const product = await fetchProduct(decodeURIComponent(id));
+  if (!product) return { title: "Product not found | Global Shelf BD" };
+  return {
+    title: `${product.productTitle} | Global Shelf BD`,
+    description: `${product.productTitle} — ${formatPrice(product.finalPrice)}. ${product.productDescription}`.slice(0, 200),
+  };
 }
 
 export default async function ProductPage({ params }: { params: Promise<Params> }) {
   const { id } = await params;
+  // `id` is the product slug (links use /product/<slug>).
+  const product = await fetchProduct(decodeURIComponent(id));
+  if (!product) notFound();
 
-  let product: Product;
-  let related: Product[];
-  try {
-    const data = await apiFetch<ProductDetailData>(`/api/products/${id}`);
-    product = data.product;
-    related = data.related;
-  } catch {
-    notFound();
-  }
+  const [{ settings, trustBadges }, relatedRes] = await Promise.all([
+    fetchSite(),
+    product.categoryId ? fetchProducts({ category: product.categoryId._id, limit: 5 }) : Promise.resolve({ products: [] }),
+  ]);
+  const related = relatedRes.products.filter((p) => p._id !== product._id).slice(0, 4);
+  const breadcrumb = product.breadcrumb ?? (product.categoryId ? [product.categoryId] : []);
+  const category = breadcrumb[breadcrumb.length - 1];
+  const outOfStock = product.availability === "OUT_OF_STOCK";
+  const pack = packLabel(product);
 
-  const discountPercent = product.rrp && product.rrp > product.price
-    ? Math.round(((product.rrp - product.price) / product.rrp) * 100)
-    : 0;
-  const { categories, settings, trustBadges } = await fetchSite();
-  const category = categories.find((c) => c.slug === product.category);
   const assurances = [
-    { icon: Truck, t: "Fast delivery", s: `Free over ${formatPrice(settings.freeShippingThreshold)}` },
+    { icon: Truck, t: "Fast delivery", s: `${formatPrice(settings.shippingInsideDhaka)} inside Dhaka` },
     ...[
       { icon: ShieldCheck, badge: trustBadges.find((b) => /authentic/i.test(b.title)) },
       { icon: RotateCcw, badge: trustBadges.find((b) => /return/i.test(b.title)) },
     ].flatMap(({ icon, badge }) => (badge ? [{ icon, t: badge.title, s: badge.body }] : [])),
   ];
-  const off = discountPercent;
-  const lowStock = product.stock <= 15;
 
   return (
     <>
@@ -66,80 +53,42 @@ export default async function ProductPage({ params }: { params: Promise<Params> 
           <Link href="/" className="hover:text-brand-700">Home</Link>
           <span>/</span>
           <Link href="/shop" className="hover:text-brand-700">Shop</Link>
-          {category && (
-            <>
+          {breadcrumb.map((c) => (
+            <span key={c._id} className="flex items-center gap-1.5">
               <span>/</span>
-              <Link href={`/shop?category=${category.slug}`} className="hover:text-brand-700">{category.name}</Link>
-            </>
-          )}
+              <Link href={`/shop?category=${c.slug}`} className="hover:text-brand-700">{c.name}</Link>
+            </span>
+          ))}
           <span>/</span>
-          <span className="font-semibold text-navy-700 line-clamp-1">{product.name}</span>
+          <span className="font-semibold text-navy-700 line-clamp-1">{product.productTitle}</span>
         </nav>
 
         <div className="grid lg:grid-cols-2 gap-6 lg:gap-10 rounded-3xl bg-white border border-slate-200 shadow-sm p-4 sm:p-8">
-          {/* Gallery */}
-          <div>
-            <div className={`relative aspect-square rounded-3xl ${product.tint} flex items-center justify-center overflow-hidden`}>
-              {off > 0 && (
-                <span className="absolute top-4 left-4 px-3 py-1.5 rounded-full bg-blue-600 text-white text-xs font-black">{off}% OFF</span>
-              )}
-              {product.badge === "NEW" && (
-                <span className="absolute top-4 left-4 px-3 py-1.5 rounded-full bg-navy-600 text-white text-xs font-black">NEW</span>
-              )}
-              <ProductImage image={product.image} emoji={product.emoji} alt={product.name} emojiClass="text-[9rem] sm:text-[12rem] leading-none drop-shadow-lg animate-float select-none" />
-            </div>
-            {/* Decorative emoji views only make sense for the placeholder tile, not for a real photo */}
-            {!product.image && (
-            <div className="grid grid-cols-3 gap-3 mt-3">
-              {[
-                { label: "Front", scale: "scale-100" },
-                { label: "Pack", scale: "scale-75" },
-                { label: "Detail", scale: "scale-125" },
-              ].map((v) => (
-                <div key={v.label} className={`aspect-[4/3] rounded-2xl ${product.tint} border border-slate-200 flex items-center justify-center overflow-hidden`}>
-                  <span className={`text-4xl ${v.scale}`}>{product.emoji}</span>
-                </div>
-              ))}
-            </div>
-            )}
-          </div>
+          <ProductGallery images={[product.thumbnail, ...product.gallery].filter(Boolean)} alt={product.productTitle} discountPercent={product.discountPercent} />
 
-          {/* Info */}
           <div className="flex flex-col">
-            <p className="text-xs font-black uppercase tracking-widest text-brand-700">{product.brand}</p>
-            <h1 className="text-2xl sm:text-3xl font-black text-navy-700 tracking-tight leading-tight mt-1.5">{product.name}</h1>
-            <p className="text-sm text-slate-500 mt-1">{product.size}</p>
-
-            {product.reviews > 0 && (
-            <div className="flex items-center gap-2 mt-3 text-sm">
-              <div className="flex" aria-hidden="true">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <Star key={i} className={`w-4 h-4 ${i < Math.round(product.rating) ? "fill-sun-400 text-sun-400" : "text-slate-300"}`} />
-                ))}
-              </div>
-              <span className="font-bold text-navy-700">{product.rating.toFixed(1)}</span>
-              <span className="text-slate-500">({product.reviews} reviews)</span>
-            </div>
-            )}
+            {category && <p className="text-xs font-black uppercase tracking-widest text-brand-700">{category.name}</p>}
+            <h1 className="text-2xl sm:text-3xl font-black text-navy-700 tracking-tight leading-tight mt-1.5">{product.productTitle}</h1>
+            {pack && <p className="text-sm text-slate-500 mt-1">{pack}</p>}
 
             <div className="mt-5 flex flex-wrap items-baseline gap-3">
-              <span className="text-4xl font-black text-brand-700">{formatPrice(product.price)}</span>
-              {product.rrp && (
+              <span className="text-4xl font-black text-brand-700">{formatPrice(product.finalPrice)}</span>
+              {product.discountPercent > 0 && (
                 <>
-                  <span className="text-lg text-slate-400 line-through">RRP {formatPrice(product.rrp)}</span>
+                  <span className="text-lg text-slate-400 line-through">{formatPrice(product.customerSellPrice)}</span>
                   <span className="px-2.5 py-1 rounded-full bg-brand-100 text-brand-800 text-xs font-black">
-                    You save {formatPrice(product.rrp - product.price)}
+                    You save {formatPrice(product.customerSellPrice - product.finalPrice)}
                   </span>
                 </>
               )}
             </div>
 
-            <p className={`mt-3 inline-flex items-center gap-2 text-sm font-bold ${lowStock ? "text-sun-500" : "text-brand-700"}`}>
-              <CheckCircle2 className="w-4 h-4" />
-              {lowStock ? `Only ${product.stock} left in stock — order soon` : "In stock — ready to ship"}
+            <p className={`mt-3 inline-flex items-center gap-2 text-sm font-bold ${outOfStock ? "text-rose-600" : "text-brand-700"}`}>
+              {outOfStock ? <CircleX className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+              {outOfStock ? "Out of stock" : "In stock — ready to ship"}
             </p>
 
-            <p className="text-sm text-slate-600 leading-relaxed mt-4">{product.description}</p>
+            {product.productDescription && <p className="text-sm text-slate-600 leading-relaxed mt-4 whitespace-pre-line">{product.productDescription}</p>}
 
             <div className="mt-6 pt-6 border-t border-slate-100">
               <PurchasePanel product={product} />
@@ -159,36 +108,23 @@ export default async function ProductPage({ params }: { params: Promise<Params> 
           </div>
         </div>
 
-        {/* Details */}
-        <div className="grid md:grid-cols-2 gap-6 mt-6">
-          <section className="rounded-3xl bg-white border border-slate-200 p-6 sm:p-8">
-            <h2 className="text-lg font-black text-navy-700 mb-4">Key benefits</h2>
-            <ul className="space-y-3">
-              {product.highlights.map((h) => (
-                <li key={h} className="flex items-start gap-3 text-sm text-slate-700">
-                  <BadgeCheck className="w-5 h-5 text-brand-600 shrink-0" /> {h}
-                </li>
-              ))}
-            </ul>
-          </section>
-          <section className="rounded-3xl bg-white border border-slate-200 p-6 sm:p-8">
-            <h2 className="text-lg font-black text-navy-700 mb-4">Product details</h2>
-            <dl className="text-sm divide-y divide-slate-100">
-              {[
-                ["Brand", product.brand],
-                ["Category", category?.name ?? product.category],
-                ["Pack size", product.size],
-                ["Product code", product.id.toUpperCase()],
-                ["Delivery", "Dhaka 1–2 days · Nationwide 2–4 days"],
-              ].map(([k, v]) => (
-                <div key={k} className="flex justify-between gap-4 py-2.5">
-                  <dt className="text-slate-500">{k}</dt>
-                  <dd className="font-semibold text-navy-700 text-right">{v}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        </div>
+        <section className="rounded-3xl bg-white border border-slate-200 p-6 sm:p-8 mt-6">
+          <h2 className="text-lg font-black text-navy-700 mb-4">Product details</h2>
+          <dl className="text-sm divide-y divide-slate-100">
+            {[
+              ["Category", breadcrumb.map((c) => c.name).join(" › ") || "—"],
+              ...(product.sizes.length ? [["Available sizes", product.sizes.join(", ")]] : []),
+              ...(pack ? [["Pack size", pack]] : []),
+              ["Availability", outOfStock ? "Out of stock" : "In stock"],
+              ["Delivery", `Dhaka ${formatPrice(settings.shippingInsideDhaka)} · Nationwide ${formatPrice(settings.shippingOutsideDhaka)}`],
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-4 py-2.5">
+                <dt className="text-slate-500">{k}</dt>
+                <dd className="font-semibold text-navy-700 text-right">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
       </div>
 
       <ProductSection id="related" title="You May Also Like" bn="আপনার পছন্দ হতে পারে" products={related} href={category ? `/shop?category=${category.slug}` : "/shop"} />

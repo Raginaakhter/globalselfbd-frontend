@@ -5,7 +5,6 @@ import { AuthProvider } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
 import { WishlistProvider } from "@/context/WishlistContext";
 import CartDrawer from "@/components/shop/CartDrawer";
-import GoogleAuthWrapper from "@/components/auth/GoogleAuthWrapper";
 import { Toaster } from "sonner";
 import { SiteProvider } from "@/context/SiteContext";
 import { fetchSite } from "@/lib/site-fetch";
@@ -47,7 +46,6 @@ export default async function RootLayout({
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${hindSiliguri.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full flex flex-col font-sans bg-[#f6faf7] text-slate-900 selection:bg-brand-500 selection:text-white" suppressHydrationWarning>
-        <GoogleAuthWrapper>
           <AuthProvider>
             <SiteProvider value={site}>
             <WishlistProvider>
@@ -59,7 +57,6 @@ export default async function RootLayout({
             </SiteProvider>
             <Toaster position="top-right" richColors closeButton />
           </AuthProvider>
-        </GoogleAuthWrapper>
       </body>
     </html>
   );

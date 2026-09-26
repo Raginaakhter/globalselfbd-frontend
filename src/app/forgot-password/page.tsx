@@ -46,7 +46,7 @@ export default function ForgotPasswordPage() {
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Forgot Password?</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Enter your registered email address and we&apos;ll send you a 4-digit verification code.
+            Enter your registered email address and we&apos;ll send you a 6-digit verification code.
           </p>
         </div>
 

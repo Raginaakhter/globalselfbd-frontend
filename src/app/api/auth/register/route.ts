@@ -1,12 +1,12 @@
-import { NextRequest, NextResponse } from "next/server";
-import { handleMockLogin } from "@/lib/mockData";
+import { NextRequest } from "next/server";
+import { callBackend, jsonPost, type BackendSession } from "@/lib/server/backend";
+import { forwardedFor, readJson, sessionResponse } from "../_shared";
 
 export async function POST(req: NextRequest) {
-  try {
-    const { email } = await req.json();
-    const result = handleMockLogin(email || "newuser@globalshelfbd.com");
-    return NextResponse.json({ success: true, message: "Account created successfully!", data: result });
-  } catch {
-    return NextResponse.json({ success: false, message: "Registration failed" }, { status: 500 });
-  }
+  const { name, fullName, email, password, confirmPassword } = await readJson(req);
+  const result = await callBackend<BackendSession>(
+    "/api/auth/register",
+    jsonPost({ fullName: fullName ?? name, email, password, confirmPassword }, forwardedFor(req))
+  );
+  return sessionResponse(result);
 }

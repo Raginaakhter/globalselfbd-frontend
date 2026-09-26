@@ -1,19 +1,13 @@
 import { z } from "zod";
 
-// Password regex: At least 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special char
-const strongPasswordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+// Matches the backend rule: any 6 or more characters.
+const passwordRule = z.string().min(6, "Password must be at least 6 characters");
 
 export const registerSchema = z
   .object({
-    name: z.string().min(2, "Full Name must be at least 2 characters long").max(100),
+    name: z.string().trim().min(1, "Please provide full name").max(100, "Full name cannot exceed 100 characters"),
     email: z.string().email("Please enter a valid email address").toLowerCase().trim(),
-    password: z
-      .string()
-      .min(8, "Password must be at least 8 characters long")
-      .regex(
-        strongPasswordRegex,
-        "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)"
-      ),
+    password: passwordRule,
     confirmPassword: z.string(),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -34,30 +28,20 @@ export const verifyOtpSchema = z.object({
   email: z.string().email("Please enter a valid email address").toLowerCase().trim(),
   otp: z
     .string()
-    .length(4, "OTP must be exactly 4 digits")
-    .regex(/^\d{4}$/, "OTP must contain only numbers"),
+    .length(6, "OTP must be exactly 6 digits")
+    .regex(/^\d{6}$/, "OTP must contain only numbers"),
 });
 
 export const resetPasswordSchema = z
   .object({
     resetToken: z.string().min(1, "Reset token authorization is required"),
-    newPassword: z
-      .string()
-      .min(8, "Password must be at least 8 characters long")
-      .regex(
-        strongPasswordRegex,
-        "Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character (@$!%*?&)"
-      ),
+    newPassword: passwordRule,
     confirmPassword: z.string(),
   })
   .refine((data) => data.newPassword === data.confirmPassword, {
     message: "Passwords do not match",
     path: ["confirmPassword"],
   });
-
-export const googleAuthSchema = z.object({
-  idToken: z.string().min(1, "Google ID Token is required"),
-});
 
 export const contactSchema = z.object({
   name: z.string().trim().min(2, "Please enter your full name.").max(150),

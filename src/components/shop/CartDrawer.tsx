@@ -2,29 +2,23 @@
 
 import React from "react";
 import Link from "next/link";
-import { X, ShoppingBag, Trash2, Truck, ArrowRight } from "lucide-react";
+import { X, ShoppingBag, Trash2, ArrowRight, Loader2 } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { formatPrice } from "@/lib/shop";
-import { useSite } from "@/context/SiteContext";
 import QuantityStepper from "./QuantityStepper";
 import ProductImage from "./ProductImage";
+import CartLineIssue from "./CartLineIssue";
 
 export default function CartDrawer() {
-  const { drawerOpen, closeDrawer, lines, subtotal, count, setQty, removeItem } = useCart();
-  const FREE_SHIPPING_THRESHOLD = useSite().settings.freeShippingThreshold;
-
-  const remaining = Math.max(FREE_SHIPPING_THRESHOLD - subtotal, 0);
-  const progress = Math.min((subtotal / FREE_SHIPPING_THRESHOLD) * 100, 100);
+  const { drawerOpen, closeDrawer, lines, subtotal, count, setQty, removeItem, loading, source } = useCart();
 
   return (
     <div className={`fixed inset-0 z-[100] ${drawerOpen ? "" : "pointer-events-none"}`} aria-hidden={!drawerOpen}>
-      {/* Backdrop */}
       <div
         onClick={closeDrawer}
         className={`absolute inset-0 bg-navy-900/55 backdrop-blur-[2px] transition-opacity duration-300 ${drawerOpen ? "opacity-100" : "opacity-0"}`}
       />
 
-      {/* Panel */}
       <aside
         role="dialog"
         aria-modal="true"
@@ -37,6 +31,7 @@ export default function CartDrawer() {
           <h2 className="flex items-center gap-2.5 text-lg font-black text-navy-700">
             <ShoppingBag className="w-5 h-5 text-brand-600" /> Your Cart
             <span className="px-2 py-0.5 rounded-full bg-brand-100 text-brand-800 text-xs font-bold">{count}</span>
+            {loading && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
           </h2>
           <button onClick={closeDrawer} aria-label="Close cart" className="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500 cursor-pointer">
             <X className="w-5 h-5" />
@@ -54,38 +49,29 @@ export default function CartDrawer() {
           </div>
         ) : (
           <>
-            {/* Free shipping progress */}
-            <div className="px-5 py-3.5 bg-brand-50 border-b border-brand-100 shrink-0">
-              <p className="flex items-center gap-2 text-xs font-bold text-brand-800">
-                <Truck className="w-4 h-4" />
-                {remaining === 0 ? "You've unlocked FREE delivery! 🎉" : `Add ${formatPrice(remaining)} more for FREE delivery`}
-              </p>
-              <div className="mt-2 h-2 rounded-full bg-white overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-brand-400 to-brand-600 transition-all duration-500" style={{ width: `${progress}%` }} />
-              </div>
-            </div>
-
             <ul className="flex-1 overflow-y-auto divide-y divide-slate-100 px-5">
-              {lines.map(({ product, qty, lineTotal }) => (
-                <li key={product.id} className="py-4 flex gap-3.5">
-                  <Link href={`/product/${product.id}`} onClick={closeDrawer} className={`w-20 h-20 shrink-0 rounded-xl ${product.tint} flex items-center justify-center text-4xl`}>
-                    <ProductImage image={product.image} emoji={product.emoji} alt={product.name} />
+              {lines.map((l) => (
+                <li key={l.key} className={`py-4 flex gap-3.5 ${l.isAvailable ? "" : "opacity-70"}`}>
+                  <Link href={`/product/${l.slug}`} onClick={closeDrawer} className="w-20 h-20 shrink-0 rounded-xl bg-slate-50 flex items-center justify-center overflow-hidden">
+                    <ProductImage image={l.thumbnail} alt={l.title} />
                   </Link>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
-                      <Link href={`/product/${product.id}`} onClick={closeDrawer} className="text-sm font-bold text-navy-700 leading-snug line-clamp-2 hover:text-brand-700">
-                        {product.name}
+                      <Link href={`/product/${l.slug}`} onClick={closeDrawer} className="text-sm font-bold text-navy-700 leading-snug line-clamp-2 hover:text-brand-700">
+                        {l.title}
                       </Link>
-                      <button onClick={() => removeItem(product.id)} aria-label={`Remove ${product.name}`} className="text-slate-400 hover:text-coral-500 p-1 -mr-1 cursor-pointer">
+                      <button onClick={() => removeItem(l.key)} aria-label={`Remove ${l.title}`} className="text-slate-400 hover:text-coral-500 p-1 -mr-1 cursor-pointer">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      {product.brand} • {product.size}
+                      {l.size ? `Size ${l.size} · ` : ""}
+                      {formatPrice(l.unitPrice)} each
                     </p>
+                    <CartLineIssue line={l} />
                     <div className="mt-2.5 flex items-center justify-between">
-                      <QuantityStepper size="sm" value={qty} onChange={(n) => setQty(product.id, n)} />
-                      <p className="text-base font-black text-brand-700">{formatPrice(lineTotal)}</p>
+                      <QuantityStepper size="sm" value={l.quantity} onChange={(n) => setQty(l.key, n)} />
+                      <p className="text-base font-black text-brand-700">{formatPrice(l.subtotal)}</p>
                     </div>
                   </div>
                 </li>
@@ -97,7 +83,9 @@ export default function CartDrawer() {
                 <span className="font-semibold text-slate-600">Subtotal</span>
                 <span className="text-xl font-black text-navy-700">{formatPrice(subtotal)}</span>
               </div>
-              <p className="text-xs text-slate-500 mt-1">Delivery charge calculated at checkout.</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Delivery charge calculated at checkout.{source === "local" && " Sign in at checkout to place your order."}
+              </p>
               <div className="grid grid-cols-2 gap-3 mt-4">
                 <Link href="/cart" onClick={closeDrawer} className="py-3 rounded-full text-sm font-bold text-center text-navy-700 border-2 border-navy-700 hover:bg-navy-50 transition-colors">
                   View Cart

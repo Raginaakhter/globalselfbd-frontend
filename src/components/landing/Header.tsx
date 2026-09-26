@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useCart } from "@/context/CartContext";
 import { useWishlist } from "@/context/WishlistContext";
+import CategoryIcon from "@/components/shop/CategoryIcon";
 import { Search, ShoppingCart, User as UserIcon, Menu, X, LayoutGrid, Package, Heart } from "lucide-react";
 import Logo from "./Logo";
 import { useSite } from "@/context/SiteContext";
@@ -81,7 +82,7 @@ export default function Header() {
             <>
               {user?.role === "admin" && (
                 <Link
-                  href="/admin"
+                  href="/admin-dashboard"
                   className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors"
                 >
                   Admin
@@ -156,8 +157,8 @@ export default function Header() {
             {catOpen && (
               <div className="absolute left-0 top-full w-140 bg-white rounded-b-2xl border border-slate-200 shadow-2xl p-3 grid grid-cols-2 gap-1">
                 {categories.map((c) => (
-                  <Link key={c.slug} href={`/shop?category=${c.slug}`} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-blue-50 transition-colors">
-                    <span className={`w-9 h-9 rounded-lg flex items-center justify-center text-lg ${c.tint}`}>{c.emoji}</span>
+                  <Link key={c._id} href={`/shop?category=${c.slug}`} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-blue-50 transition-colors">
+                    <CategoryIcon category={c} />
                     <span className="text-sm font-semibold text-blue-950">{c.name}</span>
                   </Link>
                 ))}
@@ -184,8 +185,8 @@ export default function Header() {
         <div className="lg:hidden border-t border-slate-200 bg-white max-h-[70vh] overflow-y-auto">
           <div className="px-4 py-3 grid grid-cols-2 gap-2">
             {categories.map((c) => (
-              <Link key={c.slug} href={`/shop?category=${c.slug}`} onClick={() => setMenuOpen(false)} className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-100 hover:bg-brand-50">
-                <span className={`w-8 h-8 rounded-lg flex items-center justify-center ${c.tint}`}>{c.emoji}</span>
+              <Link key={c._id} href={`/shop?category=${c.slug}`} onClick={() => setMenuOpen(false)} className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-100 hover:bg-brand-50">
+                <CategoryIcon category={c} className="w-8 h-8 rounded-lg text-xs" />
                 <span className="text-xs font-semibold text-navy-700 leading-tight">{c.name}</span>
               </Link>
             ))}

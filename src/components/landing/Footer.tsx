@@ -6,7 +6,7 @@ import Logo from "./Logo";
 import { useSite } from "@/context/SiteContext";
 
 export default function Footer() {
-  const { settings, footerColumns } = useSite();
+  const { settings, footerColumns, footerLogoUrl, copyrightText } = useSite();
   const { email, phone, whatsapp, address, socials, tagline, complaintTitle, complaintNote } = settings;
 
   return (
@@ -14,7 +14,12 @@ export default function Footer() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-14 pb-8">
         <div className="grid gap-10 lg:grid-cols-[1.3fr_repeat(3,1fr)_1.1fr]">
           <div>
-            <Logo light />
+            {footerLogoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={footerLogoUrl} alt={settings.siteName} className="h-12 w-auto max-w-[200px] object-contain" />
+            ) : (
+              <Logo light />
+            )}
             {tagline && <p className="text-sm text-white/65 leading-relaxed mt-4 max-w-xs">{tagline}</p>}
             {(socials.length > 0 || whatsapp) && (
               <div className="flex gap-2.5 mt-5">
@@ -46,11 +51,11 @@ export default function Footer() {
           </div>
 
           {footerColumns.map((col) => (
-            <div key={col.title}>
+            <div key={`${col.title}-${col.links.length}`}>
               <h3 className="text-xs font-black uppercase tracking-widest text-brand-400 mb-4">{col.title}</h3>
               <ul className="space-y-2.5">
                 {col.links.map((l) => (
-                  <li key={l.label}>
+                  <li key={`${l.label}-${l.href}`}>
                     <Link href={l.href} className="text-sm text-white/70 hover:text-white hover:translate-x-0.5 inline-block transition-all">
                       {l.label}
                     </Link>
@@ -92,7 +97,7 @@ export default function Footer() {
         </div>
 
         <div className="mt-12 pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-white/50">
-          <p>&copy; {new Date().getFullYear()} {settings.siteName}. All rights reserved.</p>
+          <p>{copyrightText || `© ${new Date().getFullYear()} ${settings.siteName}. All rights reserved.`}</p>
           <div className="flex flex-wrap justify-center gap-x-5 gap-y-1.5">
             <Link href="/terms" className="hover:text-white">Terms of Service</Link>
             <Link href="/refund-policy" className="hover:text-white">Refund Policy</Link>

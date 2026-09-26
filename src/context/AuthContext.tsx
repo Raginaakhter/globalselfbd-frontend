@@ -2,101 +2,150 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
+import { toSessionUser, type BackendSessionUser, type ClientSession, type MenuItem, type SessionUser } from "@/lib/auth-types";
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  avatar?: string | null;
-  provider: string;
-  role: string;
-  emailVerified: boolean;
-  createdAt: string;
+export type User = SessionUser;
+export type { MenuItem };
+
+/** Error thrown by `api()` with the backend's message and HTTP status. */
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
+export interface ApiResponse<T> {
+  success: boolean;
+  message?: string;
+  data: T;
+  pagination?: { page: number; limit: number; total: number; totalPages: number };
 }
 
 interface AuthContextType {
   user: User | null;
   accessToken: string | null;
+  permissions: string[];
+  menu: MenuItem[];
+  /** True for anyone the backend gives a dashboard menu (Admin, Manager, Salesman, custom staff roles). */
+  isStaff: boolean;
+  hasPermission: (permission: string) => boolean;
   isAuthenticated: boolean;
   loading: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   register: (name: string, email: string, password: string, confirmPassword: string) => Promise<boolean>;
   logout: () => Promise<void>;
-  googleLogin: (idToken: string) => Promise<boolean>;
   forgotPassword: (email: string) => Promise<boolean>;
   verifyOtp: (email: string, otp: string) => Promise<string | null>;
   resetPassword: (resetToken: string, newPassword: string, confirmPassword: string) => Promise<boolean>;
   refreshAuthSession: () => Promise<boolean>;
-  updateProfile: (name: string, avatar: string) => Promise<boolean>;
+  /** PUT /api/auth/me. Changing email needs currentPassword. Resolves true on success (errors are toasted). */
+  updateProfile: (changes: ProfileChanges) => Promise<boolean>;
+  /** POST /api/uploads/avatar: saved to the profile right away. */
+  uploadAvatar: (file: File) => Promise<boolean>;
   authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response>;
+  /** Calls the backend through the same-origin proxy (`/api/v1/...`) with the access token. Throws ApiError. */
+  api: <T = unknown>(path: string, options?: RequestInit) => Promise<ApiResponse<T>>;
+}
+
+export interface ProfileChanges {
+  fullName?: string;
+  phone?: string;
+  avatarUrl?: string;
+  email?: string;
+  currentPassword?: string;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const REFRESH_LOCK = "gsbd-auth-refresh";
+/** Refresh this long before the 15-minute access token expires. */
+const REFRESH_EARLY_MS = 60_000;
+
+function tokenExpiry(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Runs `fn` while holding a lock shared by every tab, so only one tab rotates the refresh token at a time.
+ * The backend revokes the whole session if an old refresh token is reused, which two racing tabs would do.
+ */
+function withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
+  if (typeof navigator !== "undefined" && navigator.locks?.request) {
+    return navigator.locks.request(REFRESH_LOCK, fn) as Promise<T>;
+  }
+  return fn();
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [menu, setMenu] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Ref to track the latest access token (avoids stale closures in authenticatedFetch)
+  // Latest access token for request code; updated in the same tick as the state (no stale window after login).
   const accessTokenRef = useRef<string | null>(null);
-
-  // Guard ref to prevent concurrent refresh calls (React StrictMode double-mount)
+  // Dedupes concurrent refreshes inside this tab (StrictMode double-mount, parallel 401 retries).
   const refreshInProgressRef = useRef<Promise<boolean> | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshAuthSessionRef = useRef<() => Promise<boolean>>(async () => false);
 
-  // Keep accessTokenRef in sync with state
-  useEffect(() => {
-    accessTokenRef.current = accessToken;
-  }, [accessToken]);
+  const scheduleRefresh = useCallback((token: string | null) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = null;
+    const exp = token ? tokenExpiry(token) : null;
+    if (!exp) return;
+    const delay = Math.max(exp - Date.now() - REFRESH_EARLY_MS, 5_000);
+    refreshTimerRef.current = setTimeout(() => void refreshAuthSessionRef.current(), delay);
+  }, []);
 
-  // Silent session refresh from HttpOnly refresh cookie
+  const applySession = useCallback(
+    (session: ClientSession | null) => {
+      accessTokenRef.current = session?.accessToken ?? null;
+      setAccessToken(session?.accessToken ?? null);
+      setUser(session?.user ?? null);
+      setPermissions(session?.permissions ?? []);
+      setMenu(session?.menu ?? []);
+      scheduleRefresh(session?.accessToken ?? null);
+    },
+    [scheduleRefresh]
+  );
+
+  // Silent session refresh from the HttpOnly refresh cookie
   const refreshAuthSession = useCallback(async (): Promise<boolean> => {
-    // If a refresh is already in progress, return the existing promise
-    if (refreshInProgressRef.current) {
-      return refreshInProgressRef.current;
-    }
+    if (refreshInProgressRef.current) return refreshInProgressRef.current;
 
-    const refreshPromise = (async () => {
+    const refreshPromise = withRefreshLock(async () => {
       try {
-        const res = await fetch("/api/auth/refresh", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
-
-        if (!res.ok) {
-          setUser(null);
-          setAccessToken(null);
-          accessTokenRef.current = null;
-          return false;
-        }
-
-        const data = await res.json();
-        if (data.success && data.data) {
-          setUser(data.data.user);
-          setAccessToken(data.data.accessToken);
-          accessTokenRef.current = data.data.accessToken;
+        const res = await fetch("/api/auth/refresh", { method: "POST", headers: { "Content-Type": "application/json" } });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.success && data.data) {
+          applySession(data.data);
           return true;
-        } else {
-          setUser(null);
-          setAccessToken(null);
-          accessTokenRef.current = null;
-          return false;
         }
-      } catch {
-        setUser(null);
-        setAccessToken(null);
-        accessTokenRef.current = null;
+        // 502 = backend unreachable. Keep whatever session this tab has; anything else means logged out.
+        if (res.status !== 502) applySession(null);
         return false;
-      } finally {
-        refreshInProgressRef.current = null;
+      } catch {
+        return false;
       }
-    })();
+    }).finally(() => {
+      refreshInProgressRef.current = null;
+    });
 
     refreshInProgressRef.current = refreshPromise;
     return refreshPromise;
-  }, []);
+  }, [applySession]);
 
-  // Initialize auth state on mount
+  useEffect(() => {
+    refreshAuthSessionRef.current = refreshAuthSession;
+  }, [refreshAuthSession]);
+
   useEffect(() => {
     async function initAuth() {
       setLoading(true);
@@ -104,62 +153,69 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }
     initAuth();
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
   }, [refreshAuthSession]);
 
   // Authenticated fetch wrapper with automatic token refresh on 401
   const authenticatedFetch = useCallback(
     async (url: string, options: RequestInit = {}): Promise<Response> => {
-      let currentToken = accessTokenRef.current;
-
-      if (!currentToken) {
+      if (!accessTokenRef.current) {
         const refreshed = await refreshAuthSession();
-        if (!refreshed) {
-          throw new Error("Unauthorized: Active session expired");
-        }
-        currentToken = accessTokenRef.current;
+        if (!refreshed) throw new ApiError("Please login to continue", 401);
       }
 
-      const headers = new Headers(options.headers || {});
-      if (currentToken) {
-        headers.set("Authorization", `Bearer ${currentToken}`);
-      }
+      const send = () => {
+        const headers = new Headers(options.headers || {});
+        if (accessTokenRef.current) headers.set("Authorization", `Bearer ${accessTokenRef.current}`);
+        return fetch(url, { ...options, headers });
+      };
 
-      let response = await fetch(url, { ...options, headers });
-
-      // If token expired during request, attempt silent refresh once
+      let response = await send();
+      // Access token expired mid-session: refresh once and retry
       if (response.status === 401) {
         const refreshed = await refreshAuthSession();
-        if (refreshed && accessTokenRef.current) {
-          headers.set("Authorization", `Bearer ${accessTokenRef.current}`);
-          response = await fetch(url, { ...options, headers });
-        }
+        if (refreshed) response = await send();
       }
-
       return response;
     },
     [refreshAuthSession]
   );
 
-  // Login handler
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const api = useCallback(
+    async <T,>(path: string, options: RequestInit = {}): Promise<ApiResponse<T>> => {
+      const headers = new Headers(options.headers || {});
+      if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
+        headers.set("Content-Type", "application/json");
+      }
+      const res = await authenticatedFetch(`/api/v1${path}`, { ...options, headers });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.success) {
+        throw new ApiError(body?.message || `Request failed (${res.status})`, res.status);
+      }
+      return body as ApiResponse<T>;
+    },
+    [authenticatedFetch]
+  );
+
+  const hasPermission = useCallback((permission: string) => permissions.includes(permission), [permissions]);
+
+  const startSession = async (url: string, payload: unknown, fallbackError: string, successMessage: string) => {
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(payload),
       });
-
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        setUser(data.data.user);
-        setAccessToken(data.data.accessToken);
-        toast.success(data.message || "Welcome back! Login successful.");
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success && data.data) {
+        applySession(data.data);
+        toast.success(data.message || successMessage);
         return true;
-      } else {
-        toast.error(data.message || "Invalid email or password.");
-        return false;
       }
+      toast.error(data?.message || fallbackError);
+      return false;
     } catch (err: unknown) {
       console.error(err);
       toast.error("Network error. Please check your connection.");
@@ -167,177 +223,105 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Register handler
-  const register = async (
-    name: string,
-    email: string,
-    password: string,
-    confirmPassword: string
-  ): Promise<boolean> => {
-    try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password, confirmPassword }),
-      });
+  const login = (email: string, password: string) =>
+    startSession("/api/auth/login", { email, password }, "Invalid email or password.", "Welcome back! Login successful.");
 
-      const data = await res.json();
+  const register = (name: string, email: string, password: string, confirmPassword: string) =>
+    startSession("/api/auth/register", { fullName: name, email, password, confirmPassword }, "Registration failed.", "Account created successfully!");
 
-      if (res.ok && data.success) {
-        setUser(data.data.user);
-        setAccessToken(data.data.accessToken);
-        toast.success(data.message || "Account created successfully!");
-        return true;
-      } else {
-        toast.error(data.message || "Registration failed.");
-        return false;
-      }
-    } catch (err: unknown) {
-      console.error(err);
-      toast.error("Network error. Please check your connection.");
-      return false;
-    }
+  const postPublic = async (url: string, payload: unknown) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => null);
+    return { ok: res.ok && Boolean(data?.success), data };
   };
 
-  // Google OAuth Login handler
-  const googleLogin = async (idToken: string): Promise<boolean> => {
-    try {
-      const res = await fetch("/api/auth/google", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        setUser(data.data.user);
-        setAccessToken(data.data.accessToken);
-        toast.success(data.message || "Google authentication successful!");
-        return true;
-      } else {
-        toast.error(data.message || "Google login failed.");
-        return false;
-      }
-    } catch (err: unknown) {
-      console.error(err);
-      toast.error("Google authentication failed due to network error.");
-      return false;
-    }
-  };
-
-  // Forgot Password handler
   const forgotPassword = async (email: string): Promise<boolean> => {
     try {
-      const res = await fetch("/api/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.success) {
+      const { ok, data } = await postPublic("/api/auth/forgot-password", { email });
+      if (ok) {
         toast.success(data.message || "Please check your email for the verification code.");
         return true;
-      } else {
-        toast.error(data.message || "Failed to process forgot password request.");
-        return false;
       }
-    } catch (err: unknown) {
-      console.error(err);
+      toast.error(data?.message || "Failed to process forgot password request.");
+      return false;
+    } catch {
       toast.error("Network error. Please try again.");
       return false;
     }
   };
 
-  // Verify OTP handler
   const verifyOtp = async (email: string, otp: string): Promise<string | null> => {
     try {
-      const res = await fetch("/api/auth/verify-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, otp }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.success && data.data?.resetToken) {
+      const { ok, data } = await postPublic("/api/auth/verify-otp", { email, otp });
+      if (ok && data.data?.resetToken) {
         toast.success(data.message || "Verification code verified successfully!");
         return data.data.resetToken;
-      } else {
-        toast.error(data.message || "Invalid verification code.");
-        return null;
       }
-    } catch (err: unknown) {
-      console.error(err);
+      toast.error(data?.message || "Invalid verification code.");
+      return null;
+    } catch {
       toast.error("Network error during OTP verification.");
       return null;
     }
   };
 
-  // Reset Password handler
-  const resetPassword = async (
-    resetToken: string,
-    newPassword: string,
-    confirmPassword: string
-  ): Promise<boolean> => {
+  const resetPassword = async (resetToken: string, newPassword: string, confirmPassword: string): Promise<boolean> => {
     try {
-      const res = await fetch("/api/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resetToken, newPassword, confirmPassword }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok && data.success) {
+      const { ok, data } = await postPublic("/api/auth/reset-password", { resetToken, newPassword, confirmPassword });
+      if (ok) {
         toast.success(data.message || "Password updated successfully!");
         return true;
-      } else {
-        toast.error(data.message || "Failed to reset password.");
-        return false;
       }
-    } catch (err: unknown) {
-      console.error(err);
+      toast.error(data?.message || "Failed to reset password.");
+      return false;
+    } catch {
       toast.error("Network error during password reset.");
       return false;
     }
   };
 
-  // Update profile (name / avatar) via backend
-  const updateProfile = async (name: string, avatar: string): Promise<boolean> => {
+  const updateProfile = async (changes: ProfileChanges): Promise<boolean> => {
     try {
-      const res = await authenticatedFetch("/api/user/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, avatar }),
+      const res = await api<{ user: BackendSessionUser; permissions: string[]; menu: MenuItem[] }>("/auth/me", {
+        method: "PUT",
+        body: JSON.stringify(changes),
       });
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        setUser(data.data.profile);
-        toast.success(data.message || "Profile updated successfully.");
-        return true;
-      }
-      toast.error(data.message || "Failed to update profile.");
-      return false;
-    } catch (err: unknown) {
-      console.error(err);
-      toast.error("Network error. Please try again.");
+      setUser(toSessionUser(res.data.user));
+      setPermissions(res.data.permissions ?? []);
+      setMenu(res.data.menu ?? []);
+      toast.success(res.message || "Profile updated successfully");
+      return true;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update your profile.");
       return false;
     }
   };
 
-  // Logout handler
+  const uploadAvatar = async (file: File): Promise<boolean> => {
+    const form = new FormData();
+    form.append("images", file);
+    try {
+      const res = await api<{ avatarUrl: string }>("/uploads/avatar", { method: "POST", body: form });
+      setUser((u) => (u ? { ...u, avatar: res.data.avatarUrl || null } : u));
+      toast.success(res.message || "Profile picture updated");
+      return true;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not upload the picture.");
+      return false;
+    }
+  };
+
   const logout = async (): Promise<void> => {
     try {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await withRefreshLock(() => fetch("/api/auth/logout", { method: "POST" }));
     } catch {
-      // Ignore errors on logout
+      // Ignore network errors; the local session is cleared regardless.
     } finally {
-      setUser(null);
-      setAccessToken(null);
+      applySession(null);
       toast.success("Logged out successfully.");
     }
   };
@@ -347,18 +331,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         accessToken,
+        permissions,
+        menu,
+        isStaff: menu.length > 0,
+        hasPermission,
         isAuthenticated: Boolean(user),
         loading,
         login,
         register,
         logout,
-        googleLogin,
         forgotPassword,
         verifyOtp,
         resetPassword,
         refreshAuthSession,
         updateProfile,
+        uploadAvatar,
         authenticatedFetch,
+        api,
       }}
     >
       {children}

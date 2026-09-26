@@ -1,12 +1,10 @@
-// Shared (client + server safe) types for storefront content served by /api/site.
+// Shared (client + server safe) types for storefront content: live data from the public API
+// (categories, banners, brands, footer) plus static copy from site-content.ts.
+import type { Banner, Brand } from "@/lib/backend-types";
+import type { StoreCategory } from "@/lib/storefront";
+import { SHIPPING_INSIDE_DHAKA, SHIPPING_OUTSIDE_DHAKA } from "@/lib/storefront";
 
-export type Category = {
-  slug: string;
-  name: string;
-  bn: string;
-  emoji: string;
-  tint: string; // tailwind bg class
-};
+export type Category = StoreCategory;
 
 export type SocialLink = { label: string; url: string };
 
@@ -21,32 +19,8 @@ export type SiteSettings = {
   topBarText: string;
   complaintTitle: string;
   complaintNote: string;
-  freeShippingThreshold: number;
   shippingInsideDhaka: number;
   shippingOutsideDhaka: number;
-};
-
-export type HeroSlide = {
-  eyebrow: string;
-  title: string;
-  bn: string;
-  body: string;
-  cta: string;
-  href: string;
-  gradient: string;
-  emojis: string[];
-  image?: string; // full-bleed banner image (text is part of the picture); gradient/emojis are skipped when set
-  productImage?: string; // small round product photo shown in the decorative area of a gradient slide
-};
-
-export type SideBanner = {
-  title: string;
-  body: string;
-  emoji: string;
-  gradient: string;
-  text: string;
-  href?: string;
-  image?: string; // small round product photo shown on the card
 };
 
 export type TrustBadge = { title: string; body: string; emoji: string };
@@ -65,22 +39,26 @@ export type PromoBannerContent = {
   href: string;
 };
 
-export type SiteStat = { value: string; label: string };
-
 export type SiteData = {
   settings: SiteSettings;
-  categories: Category[];
-  heroSlides: HeroSlide[];
-  sideBanners: SideBanner[];
+  /** Root categories from GET /api/public/categories (with children). */
+  categories: StoreCategory[];
+  /** Big banners for the landing page slider (GET /api/public/banners, placement HERO). */
+  banners: Banner[];
+  /** Promo cards beside the slider, max 2 (placement PROMO). */
+  promoCards: Banner[];
   trustBadges: TrustBadge[];
   navLinks: NavLink[];
   footerColumns: FooterColumn[];
   promoBanner: PromoBannerContent | null;
-  brands: string[];
-  stats: SiteStat[];
+  /** Shop Top Brands, from GET /api/public/brands?featured=true. */
+  brands: Brand[];
+  /** Footer logo and copyright from GET /api/public/footer (empty = use the defaults). */
+  footerLogoUrl: string;
+  copyrightText: string;
 };
 
-// Safe fallback used when the API is unreachable, so the layout never crashes.
+// Safe fallback used before the layout has loaded, so the UI never crashes.
 export const EMPTY_SITE: SiteData = {
   settings: {
     siteName: "Global Shelf BD",
@@ -93,17 +71,17 @@ export const EMPTY_SITE: SiteData = {
     topBarText: "",
     complaintTitle: "",
     complaintNote: "",
-    freeShippingThreshold: 2500,
-    shippingInsideDhaka: 80,
-    shippingOutsideDhaka: 130,
+    shippingInsideDhaka: SHIPPING_INSIDE_DHAKA,
+    shippingOutsideDhaka: SHIPPING_OUTSIDE_DHAKA,
   },
   categories: [],
-  heroSlides: [],
-  sideBanners: [],
+  banners: [],
+  promoCards: [],
   trustBadges: [],
   navLinks: [],
   footerColumns: [],
   promoBanner: null,
   brands: [],
-  stats: [],
+  footerLogoUrl: "",
+  copyrightText: "",
 };

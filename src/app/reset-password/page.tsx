@@ -30,17 +30,8 @@ function ResetPasswordForm() {
   const resetToken = tokenParam || storedToken || "";
   const missingToken = hydrated && !resetToken;
 
-  // Password strength calculation (0 to 4)
-  const getPasswordStrength = (pwd: string) => {
-    let score = 0;
-    if (pwd.length >= 8) score++;
-    if (/[A-Z]/.test(pwd)) score++;
-    if (/[0-9]/.test(pwd)) score++;
-    if (/[@$!%*?&]/.test(pwd)) score++;
-    return score;
-  };
-
-  const strength = getPasswordStrength(newPassword);
+  // Same rule as the backend: any 6 or more characters (letters, numbers or both).
+  const passwordOk = newPassword.length >= 6;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,15 +42,13 @@ function ResetPasswordForm() {
       return;
     }
 
-    if (newPassword !== confirmPassword) {
-      setErrorMsg("New Password and Confirm Password do not match.");
+    if (!passwordOk) {
+      setErrorMsg("Password must be at least 6 characters.");
       return;
     }
 
-    if (strength < 4) {
-      setErrorMsg(
-        "Password must be at least 8 characters long and contain uppercase, lowercase, number, and special character (@$!%*?&)."
-      );
+    if (newPassword !== confirmPassword) {
+      setErrorMsg("Password and confirm password do not match.");
       return;
     }
 
@@ -130,26 +119,9 @@ function ResetPasswordForm() {
               </button>
             </div>
 
-            {/* Password Strength */}
-            {newPassword.length > 0 && (
-              <div className="mt-2.5">
-                <div className="flex gap-1 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className={`h-full transition-all duration-300 ${strength >= 1 ? "bg-rose-500 w-1/4" : ""}`}></div>
-                  <div className={`h-full transition-all duration-300 ${strength >= 2 ? "bg-amber-500 w-1/4" : ""}`}></div>
-                  <div className={`h-full transition-all duration-300 ${strength >= 3 ? "bg-blue-500 w-1/4" : ""}`}></div>
-                  <div className={`h-full transition-all duration-300 ${strength >= 4 ? "bg-emerald-500 w-1/4" : ""}`}></div>
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-                  <span>Strength:</span>
-                  <span className="font-semibold text-slate-700">
-                    {strength <= 1 && "Weak"}
-                    {strength === 2 && "Fair"}
-                    {strength === 3 && "Good"}
-                    {strength === 4 && "Strong"}
-                  </span>
-                </p>
-              </div>
-            )}
+            <p className={`text-[11px] mt-1.5 ${newPassword.length === 0 || passwordOk ? "text-slate-500" : "text-rose-500 font-semibold"}`}>
+              Minimum 6 characters (letters, numbers or both).
+            </p>
           </div>
 
           {/* Confirm New Password */}

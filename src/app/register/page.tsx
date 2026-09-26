@@ -4,7 +4,6 @@ import React, { useState, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import GoogleLoginButton from "@/components/auth/GoogleLoginButton";
 import { User as UserIcon, Mail, Lock, Eye, EyeOff, Loader2, Globe, ShieldCheck, CheckCircle2 } from "lucide-react";
 
 function RegisterForm() {
@@ -23,17 +22,9 @@ function RegisterForm() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Calculate password strength score (0 to 4)
-  const getPasswordStrength = (pwd: string) => {
-    let score = 0;
-    if (pwd.length >= 8) score++;
-    if (/[A-Z]/.test(pwd)) score++;
-    if (/[0-9]/.test(pwd)) score++;
-    if (/[@$!%*?&]/.test(pwd)) score++;
-    return score;
-  };
-
-  const strength = getPasswordStrength(password);
+  // Same rule as the backend: any 6 or more characters (letters, numbers or both).
+  const MIN_PASSWORD = 6;
+  const passwordOk = password.length >= MIN_PASSWORD;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,20 +35,23 @@ function RegisterForm() {
       return;
     }
 
-    if (password !== confirmPassword) {
-      setErrorMsg("Password and Confirm Password do not match.");
+    if (name.trim().length > 100) {
+      setErrorMsg("Full Name must be 100 characters or fewer.");
       return;
     }
 
-    if (strength < 4) {
-      setErrorMsg(
-        "Password must be at least 8 characters long and contain uppercase, lowercase, number, and special character (@$!%*?&)."
-      );
+    if (!passwordOk) {
+      setErrorMsg("Password must be at least 6 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setErrorMsg("Password and confirm password do not match.");
       return;
     }
 
     setLoading(true);
-    const success = await register(name, email, password, confirmPassword);
+    const success = await register(name.trim(), email.trim(), password, confirmPassword);
     setLoading(false);
 
     if (success) {
@@ -106,6 +100,7 @@ function RegisterForm() {
               <input
                 type="text"
                 required
+                maxLength={100}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="John Doe"
@@ -160,26 +155,9 @@ function RegisterForm() {
               </button>
             </div>
 
-            {/* Password Strength Indicator */}
-            {password.length > 0 && (
-              <div className="mt-2.5">
-                <div className="flex gap-1 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                  <div className={`h-full transition-all duration-300 ${strength >= 1 ? "bg-rose-500 w-1/4" : ""}`}></div>
-                  <div className={`h-full transition-all duration-300 ${strength >= 2 ? "bg-amber-500 w-1/4" : ""}`}></div>
-                  <div className={`h-full transition-all duration-300 ${strength >= 3 ? "bg-blue-500 w-1/4" : ""}`}></div>
-                  <div className={`h-full transition-all duration-300 ${strength >= 4 ? "bg-emerald-500 w-1/4" : ""}`}></div>
-                </div>
-                <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-                  <span>Strength:</span>
-                  <span className="font-semibold text-slate-700">
-                    {strength <= 1 && "Weak"}
-                    {strength === 2 && "Fair"}
-                    {strength === 3 && "Good"}
-                    {strength === 4 && "Strong"}
-                  </span>
-                </p>
-              </div>
-            )}
+            <p className={`text-[11px] mt-1.5 ${password.length === 0 || passwordOk ? "text-slate-500" : "text-rose-500 font-semibold"}`}>
+              Minimum 6 characters (letters, numbers or both).
+            </p>
           </div>
 
           {/* Confirm Password */}
@@ -236,22 +214,6 @@ function RegisterForm() {
             )}
           </button>
         </form>
-
-        {/* Divider */}
-        <div className="my-6 flex items-center gap-4">
-          <div className="flex-1 h-[1px] bg-slate-200"></div>
-          <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">OR</span>
-          <div className="flex-1 h-[1px] bg-slate-200"></div>
-        </div>
-
-        {/* Google OAuth */}
-        <GoogleLoginButton
-          text="Sign up with Google"
-          onSuccessRedirect={() => {
-            const target = redirectPath.startsWith("/") && !redirectPath.startsWith("//") ? redirectPath : "/";
-            router.push(target);
-          }}
-        />
 
         {/* Footer Redirect */}
         <div className="mt-8 text-center text-sm text-slate-600">

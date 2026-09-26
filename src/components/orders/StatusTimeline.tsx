@@ -5,16 +5,16 @@ import { CheckCircle2, Circle, ClipboardCheck, PackageCheck, PackageSearch, Truc
 import { ORDER_STATUS_FLOW, ORDER_STATUS_LABELS, type OrderStatus, orderStatusFlowIndex } from "@/lib/order-status";
 
 const STEP_ICONS: Record<OrderStatus, React.ComponentType<{ className?: string }>> = {
-  pending: ClipboardCheck,
-  confirmed: CheckCircle2,
-  processing: PackageSearch,
-  out_for_delivery: Truck,
-  delivered: PackageCheck,
-  cancelled: XCircle,
+  PENDING: ClipboardCheck,
+  CONFIRMED: CheckCircle2,
+  PROCESSING: PackageSearch,
+  SHIPPED: Truck,
+  DELIVERED: PackageCheck,
+  CANCELLED: XCircle,
 };
 
 export default function StatusTimeline({ status }: { status: string }) {
-  if (status === "cancelled") {
+  if (status === "CANCELLED") {
     return (
       <div className="flex items-center gap-3 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700">
         <XCircle className="w-6 h-6 shrink-0" />
@@ -58,8 +58,8 @@ export default function StatusTimeline({ status }: { status: string }) {
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  const cancelled = status === "cancelled";
-  const delivered = status === "delivered";
+  const cancelled = status === "CANCELLED";
+  const delivered = status === "DELIVERED";
   return (
     <span
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${

@@ -1,19 +1,10 @@
 /* eslint-disable @next/next/no-img-element */
+import { Package } from "lucide-react";
 
-// Shows the product photo when one exists, otherwise the category emoji on the product's tint.
-export default function ProductImage({
-  image,
-  emoji,
-  alt,
-  emojiClass = "",
-}: {
-  image?: string | null;
-  emoji: string;
-  alt: string;
-  emojiClass?: string;
-}) {
+// Shows the product photo, or a neutral placeholder when the product has none.
+export default function ProductImage({ image, alt, className = "" }: { image?: string | null; alt: string; className?: string }) {
   if (image) {
-    return <img src={image} alt={alt} loading="lazy" className="w-full h-full object-contain" />;
+    return <img src={image} alt={alt} loading="lazy" className={`w-full h-full object-contain ${className}`} />;
   }
-  return <span className={emojiClass}>{emoji}</span>;
+  return <Package className="w-1/3 h-1/3 text-slate-300" aria-hidden="true" />;
 }

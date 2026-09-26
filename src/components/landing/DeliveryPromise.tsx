@@ -52,15 +52,15 @@ export default function DeliveryPromise() {
     return () => observer.disconnect();
   }, []);
 
-  const freeShipping = useCountUp(settings.freeShippingThreshold, inView);
   const insideDhaka = useCountUp(settings.shippingInsideDhaka, inView);
+  const outsideDhaka = useCountUp(settings.shippingOutsideDhaka, inView);
 
   const cards = [
     {
       icon: Truck,
       accent: "from-emerald-400 to-teal-500",
-      value: `${formatPrice(freeShipping)}+`,
-      label: "Free delivery above this order value",
+      value: `${formatPrice(outsideDhaka)}`,
+      label: "Delivery anywhere in Bangladesh, in 2–4 days",
     },
     {
       icon: Clock3,

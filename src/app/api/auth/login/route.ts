@@ -1,15 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
-import { handleMockLogin } from "@/lib/mockData";
+import { NextRequest } from "next/server";
+import { callBackend, jsonPost, type BackendSession } from "@/lib/server/backend";
+import { forwardedFor, readJson, sessionResponse } from "../_shared";
 
 export async function POST(req: NextRequest) {
-  try {
-    const { email } = await req.json();
-    if (!email) {
-      return NextResponse.json({ success: false, message: "Email is required" }, { status: 400 });
-    }
-    const result = handleMockLogin(email);
-    return NextResponse.json({ success: true, message: "Login successful!", data: result });
-  } catch {
-    return NextResponse.json({ success: false, message: "Login failed" }, { status: 500 });
-  }
+  const { email, password } = await readJson(req);
+  const result = await callBackend<BackendSession>("/api/auth/login", jsonPost({ email, password }, forwardedFor(req)));
+  return sessionResponse(result);
 }
